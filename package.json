@@ -1,0 +1,52 @@
+{
+  "name": "home-inventory-ai",
+  "version": "1.0.0",
+  "description": "Local home inventory app with AI assistant",
+  "main": "main.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && npm start",
+    "dev:frontend": "cd frontend && npm run dev",
+    "electron": "npx electron .",
+    "bump": "npm version patch --no-git-tag-version",
+    "build": "npm run bump && npm run build:frontend && electron-builder",
+    "build:frontend": "cd frontend && npm run build"
+  },
+  "build": {
+    "appId": "com.homeinventory.ai",
+    "productName": "Home Inventory AI",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "frontend/dist/",
+      "backend/",
+      "node_modules/",
+      "main.js"
+    ],
+    "asarUnpack": [
+      "frontend/dist/**"
+    ],
+    "win": {
+      "target": "dir",
+      "certificateFile": false,
+      "certificatePassword": false,
+      "sign": false,
+      "verifyUpdateCodeSignature": false
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    },
+    "publish": null
+  },
+  "dependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "devDependencies": {
+    "electron": "^30.5.1",
+    "electron-builder": "^23.6.0"
+  }
+}

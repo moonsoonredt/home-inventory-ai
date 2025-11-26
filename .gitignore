@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.env
+*.log
+.DS_Store
+home_inventory.db
