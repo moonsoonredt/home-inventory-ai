@@ -2,9 +2,10 @@ const { exec } = require('child_process');
 const path = require('path');
 
 // Запустить backend
-const backendProcess = require('child_process').fork(path.join(__dirname, 'backend/server.js'), [], {
-  cwd: __dirname,
-  stdio: 'inherit',
+exec(`node "${path.join(__dirname, 'backend/server.js')}"`, { cwd: __dirname }, (err) => {
+  if (err) {
+    console.error('Failed to start backend:', err);
+  }
 });
 
 // Подождать немного, затем открыть браузер
@@ -14,4 +15,4 @@ setTimeout(() => {
       console.error('Failed to open browser:', err);
     }
   });
-}, 2000); // 2 секунды на запуск backend
+}, 3000); // 3 секунды на запуск backend

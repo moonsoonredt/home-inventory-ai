@@ -12,11 +12,14 @@ const fsExtra = require('fs-extra');
 const app = express();
 const PORT = 3001;
 
+// Logging
+fs.writeFileSync('backend_log.txt', `Backend starting at ${new Date()}\n`);
+
 app.use(cors());
 app.use(express.json());
 
 // Servir frontend статически
-app.use(express.static(path.join(__dirname, 'frontend/dist')));
+app.use(express.static(path.join(__dirname, '../frontend/dist')));
 
 const upload = multer({ dest: 'temp/' });
 
@@ -221,4 +224,5 @@ app.get('*', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+  fs.appendFileSync('backend_log.txt', `Server listening on port ${PORT}\n`);
 });

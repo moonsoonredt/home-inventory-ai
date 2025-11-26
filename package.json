@@ -1,6 +1,6 @@
 {
   "name": "home-inventory-ai",
-  "version": "1.0.0",
+  "version": "1.0.6",
   "description": "Local home inventory app with AI assistant",
   "main": "main.js",
   "scripts": {
@@ -19,20 +19,18 @@
       "output": "dist"
     },
     "files": [
-      "frontend/dist/",
-      "backend/",
-      "node_modules/",
+      "frontend/dist/**/*",
+      "backend/**/*",
+      "node_modules/**/*",
       "main.js"
     ],
     "asarUnpack": [
-      "frontend/dist/**"
+      "frontend/dist/**",
+      "backend/**/*",
+      "node_modules/**/*"
     ],
     "win": {
-      "target": "dir",
-      "certificateFile": false,
-      "certificatePassword": false,
-      "sign": false,
-      "verifyUpdateCodeSignature": false
+      "target": "dir"
     },
     "mac": {
       "target": "dmg"
@@ -40,10 +38,15 @@
     "linux": {
       "target": "AppImage"
     },
-    "publish": null
+    "publish": {
+      "provider": "github",
+      "owner": "moonsoonredt",
+      "repo": "home-inventory-ai"
+    }
   },
   "dependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "electron-updater": "^6.6.2"
   },
   "devDependencies": {
     "electron": "^30.5.1",

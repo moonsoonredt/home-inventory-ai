@@ -632,6 +632,7 @@ function App() {
     }
   };
 
+
   const askAI = async (query = aiQuery) => {
     console.log('askAI called with query:', query);
     if (!query.trim()) {
