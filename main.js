@@ -1,18 +1,7 @@
-const { exec } = require('child_process');
-const path = require('path');
+const nw = require('nw');
+const backendApp = require('./backend/server');
 
-// Запустить backend
-exec(`node "${path.join(__dirname, 'backend/server.js')}"`, { cwd: __dirname }, (err) => {
-  if (err) {
-    console.error('Failed to start backend:', err);
-  }
+backendApp.listen(3001, () => {
+  console.log('Backend running on http://localhost:3001');
+  nw.Window.open('frontend/dist/index.html');
 });
-
-// Подождать немного, затем открыть браузер
-setTimeout(() => {
-  exec('start http://localhost:3001', (err) => {
-    if (err) {
-      console.error('Failed to open browser:', err);
-    }
-  });
-}, 3000); // 3 секунды на запуск backend

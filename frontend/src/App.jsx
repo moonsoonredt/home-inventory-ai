@@ -112,6 +112,7 @@ const translations = {
       expiry: 'Дата истечения:',
       open: 'Открыт:',
       confirm: 'Подтвердить',
+      incorrect: 'Не правильно',
       cancel: 'Отменить'
     },
     edit: {
@@ -245,6 +246,7 @@ const translations = {
       expiry: 'Expiry date:',
       open: 'Open:',
       confirm: 'Confirm',
+      incorrect: 'Incorrect',
       cancel: 'Cancel'
     },
     edit: {
@@ -295,6 +297,18 @@ function App() {
   const [expirySuggestion, setExpirySuggestion] = useState('');
   const [productName, setProductName] = useState('');
   const [language, setLanguage] = useState('ru');
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [updateDownloaded, setUpdateDownloaded] = useState(false);
+  const [averageRecognitionTime, setAverageRecognitionTime] = useState(0);
+  const [recognitionTimes, setRecognitionTimes] = useState([]);
+  const [pendingItems, setPendingItems] = useState([]);
+  const [currentItemIndex, setCurrentItemIndex] = useState(0);
+  const [processingTime, setProcessingTime] = useState(0);
+  const [recordingStartTime, setRecordingStartTime] = useState(0);
+  const [useAlternativePrompt, setUseAlternativePrompt] = useState(false);
+  const [currentTranscription, setCurrentTranscription] = useState('');
+  const [alternativeResults, setAlternativeResults] = useState([]);
+  const [showAlternatives, setShowAlternatives] = useState(false);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
 
@@ -310,12 +324,31 @@ function App() {
     }
     // Загрузить модели Ollama
     fetchOllamaModels();
+
+    // Слушатели обновлений
+    if (window.electronAPI) {
+      window.electronAPI.onUpdateAvailable(() => setUpdateAvailable(true));
+      window.electronAPI.onUpdateDownloaded(() => setUpdateDownloaded(true));
+    }
   }, []);
 
   useEffect(() => {
     // Сохранить историю в localStorage
     localStorage.setItem('aiHistory', JSON.stringify(aiHistory));
   }, [aiHistory]);
+
+  useEffect(() => {
+    let interval;
+    if (isProcessingVoice || isProcessingSpeechAI) {
+      setProcessingTime(0);
+      interval = setInterval(() => {
+        setProcessingTime(prev => prev + 1);
+      }, 1000);
+    } else {
+      setProcessingTime(0);
+    }
+    return () => clearInterval(interval);
+  }, [isProcessingVoice, isProcessingSpeechAI]);
 
   const fetchLocations = async () => {
     const res = await fetch('/api/locations');
@@ -447,6 +480,7 @@ function App() {
 
       mediaRecorderRef.current.start();
       setIsRecording(true);
+      setRecordingStartTime(Date.now());
     } catch (err) {
       console.error('Error accessing microphone:', err);
     }
@@ -478,7 +512,11 @@ function App() {
         return;
       }
       const transcription = data.transcription.trim();
+      const duration = data.duration;
+      const averageTime = data.averageTime;
+      setAverageRecognitionTime(averageTime);
       console.log('Transcription:', transcription);
+      console.log('Duration:', duration, 'ms, Average:', averageTime, 'ms');
       if (!transcription) {
         alert(translations[language].error.recognition + ' ' + translations[language].error.tryAgain);
         return;
@@ -487,6 +525,16 @@ function App() {
       try {
         await askAI(transcription); // Автоматически отправить запрос
         console.log('askAI completed');
+        // Вычислить полное время от начала записи до ответа AI
+        const endTime = Date.now();
+        const totalTime = endTime - recordingStartTime;
+        setRecognitionTimes(prev => {
+          const newTimes = [...prev, totalTime];
+          if (newTimes.length > 10) newTimes.shift();
+          const avg = newTimes.reduce((a, b) => a + b, 0) / newTimes.length;
+          setAverageRecognitionTime(avg);
+          return newTimes;
+        });
       } catch (err) {
         console.error('Error asking AI:', err);
         alert(translations[language].error.ai);
@@ -534,17 +582,34 @@ function App() {
       });
       const speechData = await speechRes.json();
       const transcription = speechData.transcription;
+      setCurrentTranscription(transcription);
 
       const parseRes = await fetch('/api/parse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: transcription, type, model: selectedModel })
+        body: JSON.stringify({ text: transcription, type, model: selectedModel, alternative: useAlternativePrompt })
       });
       const parsed = await parseRes.json();
 
-      setParsedData(parsed);
-      setConfirmType(type);
-      setShowConfirm(true);
+      let items;
+      if (parsed.items) {
+        items = parsed.items;
+      } else if (parsed.products) {
+        items = parsed.products;
+      } else if (parsed.name) {
+        // Legacy format
+        items = [parsed];
+      } else {
+        items = [];
+      }
+      if (items && items.length > 0) {
+        setPendingItems(items);
+        setCurrentItemIndex(0);
+        setConfirmType(type);
+        setShowConfirm(true);
+      } else {
+        alert('Не удалось распознать предметы для добавления.');
+      }
       setIsRecording(false);
       setIsProcessingVoice(false);
     } catch (err) {
@@ -555,42 +620,50 @@ function App() {
   };
 
   const confirmAdd = async () => {
+    const currentItem = pendingItems[currentItemIndex];
     if (confirmType === 'item') {
-      const location = locations.find(loc => loc.name === parsedData.location);
+      const location = locations.find(loc => loc.name === currentItem.location);
       if (location) {
         await fetch('/api/items', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: parsedData.name, location_id: location.id })
+          body: JSON.stringify({ name: currentItem.name, location_id: location.id })
         });
         fetchItems();
       }
     } else if (confirmType === 'product') {
-      const location = locations.find(loc => loc.name === parsedData.location);
+      const location = locations.find(loc => loc.name === currentItem.location);
       if (location) {
         await fetch('/api/products', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            name: parsedData.name,
+            name: currentItem.name,
             location_id: location.id,
-            quantity: parsedData.quantity,
-            unit: parsedData.unit,
-            expiry_date: parsedData.expiry_date,
-            is_open: parsedData.is_open ? 1 : 0
+            quantity: currentItem.quantity,
+            unit: currentItem.unit,
+            expiry_date: currentItem.expiry_date,
+            is_open: currentItem.is_open ? 1 : 0
           })
         });
         fetchProducts();
         fetchExpiringProducts();
       }
     }
-    setShowConfirm(false);
-    setParsedData(null);
+
+    if (currentItemIndex < pendingItems.length - 1) {
+      setCurrentItemIndex(currentItemIndex + 1);
+    } else {
+      setShowConfirm(false);
+      setPendingItems([]);
+      setCurrentItemIndex(0);
+    }
   };
 
   const cancelAdd = () => {
     setShowConfirm(false);
-    setParsedData(null);
+    setPendingItems([]);
+    setCurrentItemIndex(0);
   };
 
   const saveApiKey = async () => {
@@ -629,6 +702,29 @@ function App() {
     } catch (err) {
       console.error('Error asking expiry:', err);
       setExpirySuggestion('Ошибка получения ответа от ИИ');
+    }
+  };
+
+  const checkForUpdates = async () => {
+    try {
+      const response = await fetch('https://api.github.com/repos/moonsoonredt/home-inventory-ai/releases/latest');
+      const data = await response.json();
+      const latestVersion = data.tag_name;
+      // Предполагаем текущую версию 1.0.6 из package.json
+      const currentVersion = '1.0.6';
+      if (latestVersion > currentVersion) {
+        alert(`Доступна новая версия: ${latestVersion}. Скачайте с GitHub: https://github.com/moonsoonredt/home-inventory-ai/releases`);
+      } else {
+        alert('У вас последняя версия.');
+      }
+    } catch (error) {
+      alert('Ошибка проверки обновлений: ' + error.message);
+    }
+  };
+
+  const installUpdate = () => {
+    if (window.electronAPI) {
+      window.electronAPI.quitAndInstall();
     }
   };
 
@@ -700,6 +796,7 @@ function App() {
         <button className={activeSection === 'add' ? 'active' : ''} onClick={() => setActiveSection('add')}>{translations[language].menu.add}</button>
         <button className={activeSection === 'locations' ? 'active' : ''} onClick={() => setActiveSection('locations')}>{translations[language].menu.locations}</button>
         <button className={activeSection === 'database' ? 'active' : ''} onClick={() => setActiveSection('database')}>{translations[language].menu.database}</button>
+        <button onClick={checkForUpdates}>Проверить обновления</button>
       </div>
 
 
@@ -733,6 +830,7 @@ function App() {
 
           <h3>{translations[language].instructions.run.title}</h3>
           <p>{translations[language].instructions.run.text}</p>
+          <img src="/img/534.jpg" alt="Скриншот ошибки" style={{ maxWidth: '100%', height: 'auto', marginTop: '10px' }} />
         </div>
       )}
 
@@ -769,7 +867,8 @@ function App() {
           <button onClick={() => askAI()} disabled={isAiLoading || isProcessingSpeechAI}>
             {isAiLoading || isProcessingSpeechAI ? translations[language].ai.processing : translations[language].ai.ask}
           </button>
-          {isProcessingSpeechAI && <p>{translations[language].ai.fragment}</p>}
+          <p style={{ fontSize: '12px', color: 'gray' }}>Среднее время распознавания: {(averageRecognitionTime > 0 ? averageRecognitionTime / 1000 : 10).toFixed(2)} сек</p>
+          {isProcessingSpeechAI && <p>{translations[language].ai.fragment} ({processingTime} сек)</p>}
           {aiResponse && <p><strong>{translations[language].ai.answer}</strong> {aiResponse}</p>}
           <div className="history">
             <h3>{translations[language].ai.history}</h3>
@@ -815,6 +914,7 @@ function App() {
       {activeSection === 'add' && (
         <div className="section">
           <h2>{translations[language].add.title}</h2>
+          <p style={{ fontSize: '12px', color: 'gray' }}>Среднее время распознавания: {(averageRecognitionTime > 0 ? averageRecognitionTime / 1000 : 10).toFixed(2)} сек</p>
           <div className="subsection">
             <h3>{translations[language].add.item.title}</h3>
             <form onSubmit={addItem}>
@@ -828,7 +928,7 @@ function App() {
                 <button type="button" onClick={isRecording ? stopRecording : () => handleVoiceAdd('item')} disabled={isProcessingVoice}>
                   {isRecording ? translations[language].add.item.stop : isProcessingVoice ? translations[language].add.item.processing : translations[language].add.item.record}
                 </button>
-                {isProcessingVoice && <span>{translations[language].add.item.processing}</span>}
+                {isProcessingVoice && <span>Время: {processingTime} сек</span>}
               </div>
             </form>
           </div>
@@ -853,7 +953,7 @@ function App() {
                 <button type="button" onClick={isRecording ? stopRecording : () => handleVoiceAdd('product')} disabled={isProcessingVoice}>
                   {isRecording ? translations[language].add.product.stop : isProcessingVoice ? translations[language].add.product.processing : translations[language].add.product.record}
                 </button>
-                {isProcessingVoice && <span>{translations[language].add.product.processing}</span>}
+                {isProcessingVoice && <span>Время: {processingTime} сек</span>}
               </div>
             </form>
           </div>
@@ -922,26 +1022,87 @@ function App() {
         </div>
       )}
 
-      {showConfirm && (
+      {showConfirm && pendingItems.length > 0 && (
         <div className="confirm-modal">
-          <h3>{translations[language].confirm.title}</h3>
+          <h3>{translations[language].confirm.title} ({currentItemIndex + 1}/{pendingItems.length})</h3>
+          <p><strong>Распознанный текст:</strong> {currentTranscription}</p>
           {confirmType === 'item' && (
             <div>
-              <p>{translations[language].confirm.name} {parsedData.name}</p>
-              <p>{translations[language].confirm.location} {parsedData.location}</p>
+              <p>{translations[language].confirm.name} {pendingItems[currentItemIndex].name}</p>
+              <p>{translations[language].confirm.location} {pendingItems[currentItemIndex].location}</p>
             </div>
           )}
           {confirmType === 'product' && (
             <div>
-              <p>{translations[language].confirm.name} {parsedData.name}</p>
-              <p>{translations[language].confirm.location} {parsedData.location}</p>
-              <p>{translations[language].confirm.quantity} {parsedData.quantity} {parsedData.unit}</p>
-              <p>{translations[language].confirm.expiry} {parsedData.expiry_date}</p>
-              <p>{translations[language].confirm.open} {parsedData.is_open ? translations[language].yes : translations[language].no}</p>
+              <p>{translations[language].confirm.name} {pendingItems[currentItemIndex].name}</p>
+              <p>{translations[language].confirm.location} {pendingItems[currentItemIndex].location}</p>
+              <p>{translations[language].confirm.quantity} {pendingItems[currentItemIndex].quantity} {pendingItems[currentItemIndex].unit}</p>
+              <p>{translations[language].confirm.expiry} {pendingItems[currentItemIndex].expiry_date}</p>
+              <p>{translations[language].confirm.open} {pendingItems[currentItemIndex].is_open ? translations[language].yes : translations[language].no}</p>
             </div>
           )}
           <button onClick={confirmAdd}>{translations[language].confirm.confirm}</button>
+          <button onClick={async () => {
+            // Запустить альтернативные промпты
+            const results = [];
+            for (let i = 1; i < 4; i++) { // варианты 1,2,3
+              try {
+                const parseRes = await fetch('/api/parse', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ text: currentTranscription, type: confirmType, model: selectedModel, alternative: true, variant: i })
+                });
+                const parsed = await parseRes.json();
+                let items;
+                if (parsed.items) {
+                  items = parsed.items;
+                } else if (parsed.products) {
+                  items = parsed.products;
+                } else if (parsed.name) {
+                  items = [parsed];
+                } else {
+                  items = [];
+                }
+                results.push({ variant: i, items });
+              } catch (err) {
+                console.error('Error with variant', i, err);
+              }
+            }
+            setAlternativeResults(results);
+            setShowAlternatives(true);
+          }}>{translations[language].confirm.incorrect}</button>
           <button onClick={cancelAdd}>{translations[language].confirm.cancel}</button>
+        </div>
+      )}
+
+      {showAlternatives && (
+        <div className="confirm-modal">
+          <h3>Выберите правильный вариант</h3>
+          <p><strong>Распознанный текст:</strong> {currentTranscription}</p>
+          {alternativeResults.map((result, idx) => (
+            <div key={idx} style={{ border: '1px solid #ccc', padding: '10px', margin: '10px 0' }}>
+              <h4>Вариант {result.variant}</h4>
+              {result.items.map((item, i) => (
+                <div key={i}>
+                  {confirmType === 'item' ? (
+                    <p>{item.name} — {item.location}</p>
+                  ) : (
+                    <p>{item.name} — {item.location}, {item.quantity} {item.unit}</p>
+                  )}
+                </div>
+              ))}
+              <button onClick={() => {
+                setPendingItems(result.items);
+                setCurrentItemIndex(0);
+                setShowAlternatives(false);
+                setAlternativeResults([]);
+              }}>Выбрать этот</button>
+            </div>
+          ))}
+          <button onClick={() => {
+            setShowAlternatives(false);
+            setAlternativeResults([]);
+          }}>Отмена</button>
         </div>
       )}
 

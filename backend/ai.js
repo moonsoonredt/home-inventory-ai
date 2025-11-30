@@ -1,7 +1,7 @@
 const fetch = require('node-fetch');
 const db = require('./db');
 
-async function parseText(userText, type, model = 'qwen2:1.5b') {
+async function parseText(userText, type, model = 'qwen2:1.5b', alternative = false, variant = 0) {
   // Получить locations
   return new Promise((resolve, reject) => {
     db.all('SELECT * FROM locations', [], (err, locations) => {
@@ -9,16 +9,47 @@ async function parseText(userText, type, model = 'qwen2:1.5b') {
 
       const locationsStr = locations.map(loc => loc.name).join(', ');
 
-      let prompt;
+      let prompts;
       if (type === 'item') {
-        prompt = `Ты — помощник по добавлению вещей. Извлеки из текста название вещи и место хранения. Места: [${locationsStr}].
-Текст: «${userText}»
-Ответь в формате JSON: {"name": "название", "location": "место"}. Если место не указано, выбери подходящее.`;
+        prompts = [
+          `Текст: "${userText}". Места: ${locationsStr}.
+Найди все отдельные предметы для добавления. Раздели по "и", запятым. Не объединяй в один предмет.
+Пример: "добавь яблоко и грушу в спальню" -> [{"name": "яблоко", "location": "спальню"}, {"name": "грушу", "location": "спальню"}].
+Верни JSON {"items": [{"name": "вещь", "location": "место"}]}.`,
+          `Текст: "${userText}". Места: ${locationsStr}.
+Перечисли отдельные предметы. Раздели по "и", запятым. Каждый предмет отдельно.
+Пример: "яблоко и грушу в спальню" -> [{"name": "яблоко", "location": "спальню"}, {"name": "грушу", "location": "спальню"}].
+Верни {"items": массив}.`,
+          `Текст: "${userText}". Места: ${locationsStr}.
+Найди предметы, раздели на список. Не объединяй.
+Пример: "добавь книгу, ручку в гостиную" -> [{"name": "книга", "location": "гостиную"}, {"name": "ручка", "location": "гостиную"}].
+Верни JSON {"items": [...]} .`,
+          `Текст: "${userText}". Места: ${locationsStr}.
+Раздели на отдельные вещи по разделителям. Прикрепи место.
+Пример: "флешку и микрофон в спальню" -> [{"name": "флешку", "location": "спальню"}, {"name": "микрофон", "location": "спальню"}].
+Верни {"items": массив}.`
+        ];
       } else if (type === 'product') {
-        prompt = `Ты — помощник по добавлению продуктов. Извлеки название, место, количество, единицу, дату истечения, открыто ли. Места: [${locationsStr}].
-Текст: «${userText}»
-Ответь в формате JSON: {"name": "название", "location": "место", "quantity": число, "unit": "единица", "expiry_date": "YYYY-MM-DD", "is_open": true/false}. Дата по умолчанию через 7 дней, если не указано.`;
+        prompts = [
+          `Текст: "${userText}". Места: ${locationsStr}.
+Найди отдельные продукты. Раздели по "и", запятым. Каждый продукт отдельно.
+Пример: "добавь молоко и хлеб на кухню" -> [{"name": "молоко", "location": "кухню"}, {"name": "хлеб", "location": "кухню"}].
+Верни {"products": [{"name": "...", "location": "...", "quantity": 1, "unit": "шт", "expiry_date": "2025-12-03", "is_open": false}]}`,
+          `Текст: "${userText}". Места: ${locationsStr}.
+Перечисли продукты отдельно. Раздели по разделителям.
+Пример: "яблоко и грушу в холодильник" -> [{"name": "яблоко", "location": "холодильник"}, {"name": "грушу", "location": "холодильник"}].
+Верни JSON {"products": [...]} .`,
+          `Текст: "${userText}". Места: ${locationsStr}.
+Найди продукты, раздели на список. Не объединяй.
+Пример: "добавь сыр, колбасу" -> [{"name": "сыр", "location": "кухня"}, {"name": "колбасу", "location": "кухня"}].
+Верни {"products": массив}.`,
+          `Текст: "${userText}". Места: ${locationsStr}.
+Раздели на отдельные продукты по "и", запятым. Прикрепи место.
+Пример: "молоко и хлеб на кухню" -> [{"name": "молоко", "location": "кухню"}, {"name": "хлеб", "location": "кухню"}].
+Верни {"products": массив}.`
+        ];
       }
+      let prompt = alternative ? prompts[variant] : prompts[0];
 
       fetch('http://localhost:11434/api/generate', {
         method: 'POST',
@@ -31,10 +62,13 @@ async function parseText(userText, type, model = 'qwen2:1.5b') {
       })
       .then(res => res.json())
       .then(data => {
+        console.log('AI response:', data.response);
         try {
           const parsed = JSON.parse(data.response);
+          console.log('Parsed JSON:', parsed);
           resolve(parsed);
         } catch (e) {
+          console.error('JSON parse error:', e);
           reject(e);
         }
       })

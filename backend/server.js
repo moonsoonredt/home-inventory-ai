@@ -15,6 +15,9 @@ const PORT = 3001;
 // Logging
 fs.writeFileSync('backend_log.txt', `Backend starting at ${new Date()}\n`);
 
+// Хранение времен распознавания
+let recognitionTimes = [];
+
 app.use(cors());
 app.use(express.json());
 
@@ -98,6 +101,7 @@ app.put('/api/products/:id', (req, res) => {
 
 // Speech to text
 app.post('/api/speech', upload.single('audio'), async (req, res) => {
+  const startTime = Date.now();
   console.log('Speech request received');
   if (!req.file) {
     console.log('No audio file provided');
@@ -145,9 +149,18 @@ app.post('/api/speech', upload.single('audio'), async (req, res) => {
       console.log('Polling status:', transcriptionResult.status);
 
       if (transcriptionResult.status === "completed") {
+        const endTime = Date.now();
+        const duration = endTime - startTime;
         console.log('Transcription completed:', transcriptionResult.text);
+        console.log('Recognition time:', duration, 'ms');
+        recognitionTimes.push(duration);
+        if (recognitionTimes.length > 10) {
+          recognitionTimes.shift();
+        }
+        const averageTime = recognitionTimes.reduce((a, b) => a + b, 0) / recognitionTimes.length;
+        console.log('Average recognition time (last 10):', averageTime, 'ms');
         fs.unlink(audioPath, () => {});
-        res.json({ transcription: transcriptionResult.text });
+        res.json({ transcription: transcriptionResult.text, duration, averageTime });
         break;
       } else if (transcriptionResult.status === "error") {
         console.log('Transcription error:', transcriptionResult.error);
@@ -169,9 +182,9 @@ app.post('/api/speech', upload.single('audio'), async (req, res) => {
 
 // Parse text
 app.post('/api/parse', async (req, res) => {
-  const { text, type, model } = req.body;
+  const { text, type, model, alternative, variant } = req.body;
   try {
-    const parsed = await parseText(text, type, model);
+    const parsed = await parseText(text, type, model, alternative, variant);
     res.json(parsed);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -219,7 +232,7 @@ app.get('/api/ollama-models', async (req, res) => {
 
 // Fallback для SPA
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'frontend/dist/index.html'));
+  res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
 });
 
 app.listen(PORT, () => {

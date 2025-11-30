@@ -9,8 +9,13 @@
     "dev:frontend": "cd frontend && npm run dev",
     "electron": "npx electron .",
     "bump": "npm version patch --no-git-tag-version",
-    "build": "npm run bump && npm run build:frontend && electron-builder",
-    "build:frontend": "cd frontend && npm run build"
+    "clean": "rimraf dist",
+    "build": "npm run clean && npm run bump && npm run build:frontend && electron-builder",
+    "build:frontend": "cd frontend && npm run build",
+    "build:win": "npm run clean && npm run build:frontend && electron-builder --win",
+    "build:mac": "npm run clean && npm run build:frontend && electron-builder --mac",
+    "build:linux": "npm run clean && npm run build:frontend && electron-builder --linux",
+    "build:all": "npm run clean && npm run build:frontend && electron-builder --win --mac --linux"
   },
   "build": {
     "appId": "com.homeinventory.ai",
@@ -45,11 +50,11 @@
     }
   },
   "dependencies": {
-    "concurrently": "^8.2.2",
-    "electron-updater": "^6.6.2"
+    "concurrently": "^8.2.2"
   },
   "devDependencies": {
     "electron": "^30.5.1",
-    "electron-builder": "^23.6.0"
+    "electron-builder": "^23.6.0",
+    "rimraf": "^5.0.5"
   }
 }
